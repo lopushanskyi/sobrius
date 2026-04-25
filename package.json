@@ -1,7 +1,7 @@
 {
   "name": "sobrius",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Sobrius — Контроль рівня алкоголю в крові",
   "scripts": {
