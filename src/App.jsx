@@ -16,7 +16,17 @@ const R_MALE = 0.68;
 const R_FEMALE = 0.55;
 const STORAGE_KEY = 'data';
 const CONSENT_KEY = 'consent';
-const WHO_WEEKLY_GRAMS = 100;
+
+// UK Chief Medical Officers low-risk drinking guideline:
+// 14 units = 112 g pure ethanol per week, same for men and women.
+// Spread over 3+ days, with several drink-free days.
+const UK_WEEKLY_GRAMS = 112;
+// Single-occasion "binge" thresholds (UK definition, in grams of ethanol):
+// 6 units (48g) for women, 8 units (64g) for men, in one day.
+const UK_BINGE_GRAMS_MALE = 64;
+const UK_BINGE_GRAMS_FEMALE = 48;
+// "Increasing risk" upper bound — 35 units/week ≈ 280 g
+const UK_INCREASING_RISK_GRAMS = 280;
 
 // ====== COLOR TOKENS (warm cream + amber) ======
 // Used in inline styles and chart props where Tailwind utility names aren't enough.
@@ -125,6 +135,29 @@ const fmtRelative = (ms) => {
   if (days < 7) return `${days} дн тому · ${fmtTime(ms)}`;
   return `${fmtDayShort(ms)} · ${fmtTime(ms)}`;
 };
+
+// Compute UK CMO-style weekly stats over a rolling 7-day window ending at `nowMs`.
+// Returns: total grams, drinking days count, biggest single day grams, binge days count.
+function computeWeeklyStats(drinks, profile, nowMs) {
+  const weekAgo = nowMs - 7 * 86400000;
+  const inWindow = drinks.filter(d => d.timestamp >= weekAgo && d.timestamp <= nowMs);
+
+  const byDay = {};
+  for (const d of inWindow) {
+    const k = dayKey(d.timestamp);
+    byDay[k] = (byDay[k] || 0) + alcoholGrams(d.volumeMl, d.alcoholPct);
+  }
+
+  const totalGrams   = Object.values(byDay).reduce((s, v) => s + v, 0);
+  const drinkingDays = Object.keys(byDay).length;
+  const dryDays      = 7 - drinkingDays;
+  const biggestDay   = Math.max(0, ...Object.values(byDay));
+
+  const bingeThreshold = profile?.gender === 'female' ? UK_BINGE_GRAMS_FEMALE : UK_BINGE_GRAMS_MALE;
+  const bingeDays = Object.values(byDay).filter(g => g >= bingeThreshold).length;
+
+  return { totalGrams, drinkingDays, dryDays, biggestDay, bingeDays, bingeThreshold };
+}
 
 // ====== APP ======
 export default function App() {
@@ -338,6 +371,9 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {/* Weekly UK CMO tracker — always visible */}
+        <WeeklyTracker drinks={drinks} profile={profile} now={now} />
 
         {/* Chart */}
         {drinks.length > 0 && (
@@ -563,6 +599,177 @@ function ConsentScreen({ onAccept }) {
   );
 }
 
+// ====== WEEKLY TRACKER (UK CMO guidelines) ======
+function WeeklyTracker({ drinks, profile, now }) {
+  const stats = useMemo(
+    () => computeWeeklyStats(drinks, profile, now),
+    [drinks, profile, now]
+  );
+
+  const { totalGrams, drinkingDays, dryDays, biggestDay, bingeDays, bingeThreshold } = stats;
+  const percent = (totalGrams / UK_WEEKLY_GRAMS) * 100;
+
+  // Risk band per UK classification
+  // < 14 units (112g): low risk (green)
+  // 14-35 units (112-280g): increasing risk (amber)
+  // > 35 units (280g): higher risk (red)
+  let bandColor, bandSoft, bandLabel, bandIcon;
+  if (totalGrams === 0) {
+    bandColor = C.ok;     bandSoft = C.okSoft;   bandLabel = 'Тиждень без алкоголю'; bandIcon = '🌿';
+  } else if (totalGrams <= UK_WEEKLY_GRAMS) {
+    bandColor = C.ok;     bandSoft = C.okSoft;   bandLabel = 'У межах низького ризику'; bandIcon = '✓';
+  } else if (totalGrams <= UK_INCREASING_RISK_GRAMS) {
+    bandColor = C.warn;   bandSoft = C.warnSoft; bandLabel = 'Підвищений ризик';      bandIcon = '⚠';
+  } else {
+    bandColor = C.bad;    bandSoft = C.badSoft;  bandLabel = 'Високий ризик';         bandIcon = '⚠';
+  }
+
+  // Spread quality (UK suggests 3+ drinking days = good distribution)
+  let spreadHint = null;
+  if (totalGrams > 0) {
+    if (drinkingDays === 1 && totalGrams >= UK_WEEKLY_GRAMS / 2) {
+      spreadHint = { text: 'Все за один день — спробуйте розподілити', color: C.warn };
+    } else if (drinkingDays >= 3 && totalGrams <= UK_WEEKLY_GRAMS) {
+      spreadHint = { text: `Розподілено на ${drinkingDays} дні — добре`, color: C.ok };
+    } else if (drinkingDays === 7) {
+      spreadHint = { text: 'Жодного «сухого» дня цього тижня', color: C.warn };
+    }
+  }
+
+  // Tooltip / explanation toggle
+  const [expanded, setExpanded] = useState(false);
+
+  // Cap progress at 200% visually
+  const visualPct = Math.min(200, percent);
+  // Markers on the bar at 100% (low risk limit) — bar uses 0-200% scale
+  const lowRiskMarkPct = (UK_WEEKLY_GRAMS / (UK_WEEKLY_GRAMS * 2)) * 100; // 50%
+
+  return (
+    <section className="card rounded-3xl p-5 sm:p-6 mb-4">
+      <div className="flex items-baseline justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <h2 className="text-base font-bold" style={{ color: C.ink }}>Тижнева норма</h2>
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-[10px] uppercase tracking-wider font-semibold rounded-full px-2 py-0.5 transition"
+            style={{ background: '#f5ead0', color: C.inkSoft }}
+          >
+            UK CMO ⓘ
+          </button>
+        </div>
+        <div className="text-xs font-semibold px-2.5 py-1 rounded-full"
+             style={{ background: bandSoft, color: bandColor }}>
+          {bandIcon} {bandLabel}
+        </div>
+      </div>
+
+      <div className="flex items-end justify-between mt-3 mb-2">
+        <div>
+          <div className="num-tabular text-4xl sm:text-5xl leading-none font-bold tracking-tight"
+               style={{ color: bandColor }}>
+            {totalGrams.toFixed(0)}
+            <span className="text-xl font-medium" style={{ color: C.inkMute }}> / {UK_WEEKLY_GRAMS} г</span>
+          </div>
+          <div className="text-[11px] mt-1.5 font-medium" style={{ color: C.inkSoft }}>
+            за останні 7 днів · {(totalGrams / 8).toFixed(1)} од. з 14
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="num-tabular text-2xl font-bold" style={{ color: bandColor }}>
+            {percent.toFixed(0)}%
+          </div>
+          <div className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkMute }}>
+            від норми
+          </div>
+        </div>
+      </div>
+
+      {/* Progress bar with marker at 100% (low-risk limit) */}
+      <div className="relative h-3 rounded-full overflow-hidden mb-1" style={{ background: '#f0e3c8' }}>
+        <div className="h-full rounded-full transition-all"
+             style={{ width: `${(visualPct / 200) * 100}%`, background: bandColor }} />
+        {/* Marker at 100% of low-risk (= 50% of visual scale) */}
+        <div className="absolute top-0 bottom-0 w-px"
+             style={{ left: `${lowRiskMarkPct}%`, background: 'rgba(60,40,15,0.3)' }} />
+      </div>
+      <div className="flex justify-between text-[9px] num-tabular font-semibold mb-3" style={{ color: C.inkMute }}>
+        <span>0</span>
+        <span style={{ marginLeft: '-12px' }}>112 г · норма</span>
+        <span>224+</span>
+      </div>
+
+      {/* Three sub-indicators */}
+      <div className="grid grid-cols-3 gap-2">
+        <SubMetric
+          label="Сухих днів"
+          value={dryDays}
+          good={dryDays >= 2}
+          warn={dryDays === 0 && totalGrams > 0}
+          subtitle="з 7"
+        />
+        <SubMetric
+          label="Найбільший день"
+          value={`${biggestDay.toFixed(0)} г`}
+          good={biggestDay > 0 && biggestDay < bingeThreshold}
+          warn={biggestDay >= bingeThreshold}
+          subtitle={biggestDay >= bingeThreshold ? '⚠ багато' : `< ${bingeThreshold} г ок`}
+        />
+        <SubMetric
+          label="Днів з ризиком"
+          value={bingeDays}
+          good={bingeDays === 0 && totalGrams > 0}
+          warn={bingeDays > 0}
+          subtitle={bingeDays > 0 ? 'binge' : 'нема'}
+        />
+      </div>
+
+      {spreadHint && (
+        <div className="mt-3 text-[11px] font-medium px-3 py-2 rounded-lg"
+             style={{ background: '#faf3e0', color: spreadHint.color }}>
+          {spreadHint.text}
+        </div>
+      )}
+
+      {expanded && (
+        <div className="mt-4 pt-4 text-[11px] leading-relaxed space-y-2"
+             style={{ color: C.inkSoft, borderTop: `1px solid ${C.border}` }}>
+          <p>
+            <strong style={{ color: C.ink }}>UK Chief Medical Officers</strong> рекомендують
+            не більше <strong>14 одиниць</strong> алкоголю на тиждень (≈112 г чистого спирту),
+            однаково для чоловіків і жінок.
+          </p>
+          <p>
+            Краще розподілити на <strong>3 і більше дні</strong>, з кількома днями повністю без алкоголю.
+            Уникати <strong>надмірного споживання за один раз</strong> (понад {bingeThreshold} г для
+            {profile?.gender === 'female' ? ' жінок' : ' чоловіків'}).
+          </p>
+          <p style={{ color: C.inkMute }}>
+            1 одиниця = 8 г чистого етанолу = пів пінти пива 4% / маленький келих вина 12% / 25 мл міцного 40%.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const SubMetric = ({ label, value, subtitle, good, warn }) => {
+  let color = C.inkSoft;
+  if (good) color = C.ok;
+  if (warn) color = C.bad;
+  return (
+    <div className="rounded-lg px-2.5 py-2.5"
+         style={{ background: '#faf3e0', border: `1px solid ${C.border}` }}>
+      <div className="text-[9px] uppercase tracking-wider font-semibold mb-1" style={{ color: C.inkMute }}>
+        {label}
+      </div>
+      <div className="num-tabular text-lg leading-none font-bold mb-0.5" style={{ color }}>
+        {value}
+      </div>
+      <div className="text-[9px] font-medium" style={{ color: C.inkMute }}>{subtitle}</div>
+    </div>
+  );
+};
+
 // ====== CHART ======
 function BACChart({ data, now, limit, safeAt }) {
   if (!data.length) return null;
@@ -682,11 +889,12 @@ function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
     };
   }, [drinks, range, now]);
 
-  const whoLimit =
-    range === 'month' ? WHO_WEEKLY_GRAMS * 4 :
-    range === 'year'  ? WHO_WEEKLY_GRAMS * 52 : null;
-  const whoPercent = whoLimit ? (stats.totalAlc / whoLimit) * 100 : 0;
-  const whoColor = whoPercent > 100 ? C.bad : whoPercent > 70 ? C.warn : C.ok;
+  // Reference limits derived from UK CMO 14 units/week (= 112 g/week)
+  const ukLimit =
+    range === 'month' ? UK_WEEKLY_GRAMS * 4 :
+    range === 'year'  ? UK_WEEKLY_GRAMS * 52 : null;
+  const ukPercent = ukLimit ? (stats.totalAlc / ukLimit) * 100 : 0;
+  const ukColor = ukPercent > 100 ? C.bad : ukPercent > 70 ? C.warn : C.ok;
 
   return (
     <section className="card rounded-3xl p-5">
@@ -728,19 +936,19 @@ function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
             <SmallStat label="Середнє/день" value={`${stats.avgPerDay.toFixed(1)} г`} />
           </div>
 
-          {whoLimit && stats.totalAlc > 0 && (
+          {ukLimit && stats.totalAlc > 0 && (
             <div className="mb-4">
               <div className="flex justify-between text-[11px] mb-1.5 font-medium">
                 <span style={{ color: C.inkSoft }}>
-                  Норма ВООЗ (низький ризик): {whoLimit} г за {range === 'month' ? 'місяць' : 'рік'}
+                  UK CMO норма (низький ризик): {ukLimit} г за {range === 'month' ? 'місяць' : 'рік'}
                 </span>
-                <span className="num-tabular font-semibold" style={{ color: whoColor }}>
-                  {whoPercent.toFixed(0)}%
+                <span className="num-tabular font-semibold" style={{ color: ukColor }}>
+                  {ukPercent.toFixed(0)}%
                 </span>
               </div>
               <div className="h-2 rounded-full overflow-hidden" style={{ background: '#f0e3c8' }}>
                 <div className="h-full rounded-full transition-all"
-                     style={{ width: `${Math.min(100, whoPercent)}%`, background: whoColor }} />
+                     style={{ width: `${Math.min(100, ukPercent)}%`, background: ukColor }} />
               </div>
             </div>
           )}
