@@ -4,10 +4,11 @@ import {
   ResponsiveContainer, Tooltip, CartesianGrid, BarChart, Bar, Cell
 } from 'recharts';
 import {
-  Trash2, Plus, Settings, Check, Clock, Droplet, X,
+  Trash2, Plus, Settings, Check, Clock, X,
   BarChart3, User, ShieldAlert, ChevronLeft, Star, CalendarClock
 } from 'lucide-react';
 import { getItem, setItem } from './storage';
+import { useT, plural } from './i18n.jsx';
 
 // ====== CONSTANTS ======
 const ETHANOL_DENSITY = 0.789;
@@ -17,31 +18,25 @@ const R_FEMALE = 0.55;
 const STORAGE_KEY = 'data';
 const CONSENT_KEY = 'consent';
 
-// UK Chief Medical Officers low-risk drinking guideline:
-// 14 units = 112 g pure ethanol per week, same for men and women.
-// Spread over 3+ days, with several drink-free days.
+// UK CMO low-risk drinking guideline: 14 units = 112 g pure ethanol per week.
 const UK_WEEKLY_GRAMS = 112;
-// Single-occasion "binge" thresholds (UK definition, in grams of ethanol):
-// 6 units (48g) for women, 8 units (64g) for men, in one day.
-const UK_BINGE_GRAMS_MALE = 64;
-const UK_BINGE_GRAMS_FEMALE = 48;
-// "Increasing risk" upper bound — 35 units/week ≈ 280 g
-const UK_INCREASING_RISK_GRAMS = 280;
+const UK_BINGE_GRAMS_MALE = 64;     // 8 units
+const UK_BINGE_GRAMS_FEMALE = 48;   // 6 units
+const UK_INCREASING_RISK_GRAMS = 280; // 35 units
 
-// ====== COLOR TOKENS (warm cream + amber) ======
-// Used in inline styles and chart props where Tailwind utility names aren't enough.
+// ====== COLOR TOKENS ======
 const C = {
-  bg:        '#fbf7f0',  // app cream
-  card:      '#fffcf6',  // card cream
-  border:    '#ece2cf',  // warm border
+  bg:        '#fbf7f0',
+  card:      '#fffcf6',
+  border:    '#ece2cf',
   borderHv:  '#ddc99e',
-  ink:       '#3d2c12',  // text deep brown
-  inkSoft:   '#6b5536',  // muted brown
-  inkMute:   '#a89876',  // tertiary
-  amber:     '#b8731a',  // primary amber
-  amberDeep: '#7a4a0e',  // hover/strong
-  amberSoft: '#fde9c4',  // tag bg
-  ok:        '#0f7c52',  // emerald
+  ink:       '#3d2c12',
+  inkSoft:   '#6b5536',
+  inkMute:   '#a89876',
+  amber:     '#b8731a',
+  amberDeep: '#7a4a0e',
+  amberSoft: '#fde9c4',
+  ok:        '#0f7c52',
   okSoft:    '#d4f0e0',
   warn:      '#a36500',
   warnSoft:  '#fbe4b8',
@@ -52,30 +47,54 @@ const C = {
 
 const DEFAULT_PROFILE = { gender: 'male', weight: 75, legalLimit: 0.5 };
 
+// Built-in presets reference i18n keys for names
 const BUILTIN_PRESETS = [
-  { id: 'beer-light',  name: 'Пиво світле',  volumeMl: 500, alcoholPct: 5,  icon: '🍺', builtin: true },
-  { id: 'beer-strong', name: 'Пиво міцне',   volumeMl: 500, alcoholPct: 7,  icon: '🍻', builtin: true },
-  { id: 'wine',        name: 'Вино',         volumeMl: 150, alcoholPct: 12, icon: '🍷', builtin: true },
-  { id: 'champagne',   name: 'Шампанське',   volumeMl: 150, alcoholPct: 11, icon: '🥂', builtin: true },
-  { id: 'vodka',       name: 'Горілка',      volumeMl: 50,  alcoholPct: 40, icon: '🥃', builtin: true },
-  { id: 'whiskey',     name: 'Віскі',        volumeMl: 50,  alcoholPct: 40, icon: '🥃', builtin: true },
-  { id: 'cocktail',    name: 'Коктейль',     volumeMl: 200, alcoholPct: 15, icon: '🍹', builtin: true }
+  { id: 'beer-light',  nameKey: 'presets.beerLight',  volumeMl: 500, alcoholPct: 5,  icon: '🍺', builtin: true },
+  { id: 'beer-strong', nameKey: 'presets.beerStrong', volumeMl: 500, alcoholPct: 7,  icon: '🍻', builtin: true },
+  { id: 'wine',        nameKey: 'presets.wine',       volumeMl: 150, alcoholPct: 12, icon: '🍷', builtin: true },
+  { id: 'champagne',   nameKey: 'presets.champagne',  volumeMl: 150, alcoholPct: 11, icon: '🥂', builtin: true },
+  { id: 'vodka',       nameKey: 'presets.vodka',      volumeMl: 50,  alcoholPct: 40, icon: '🥃', builtin: true },
+  { id: 'whiskey',     nameKey: 'presets.whiskey',    volumeMl: 50,  alcoholPct: 40, icon: '🥃', builtin: true },
+  { id: 'cocktail',    nameKey: 'presets.cocktail',   volumeMl: 200, alcoholPct: 15, icon: '🍹', builtin: true }
 ];
 
 const DRINK_ICONS = ['🍺', '🍻', '🍷', '🥂', '🥃', '🍹', '🍶', '🍾', '🧃'];
 
-// ====== BAC MATH ======
+// ====== INLINE DROP LOGO ======
+// Same droplet as launcher icon (resources/icon.png), rendered as SVG.
+function DropLogo({ size = 36 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="logoBg" cx="50%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#1a0f08" />
+          <stop offset="100%" stopColor="#050302" />
+        </radialGradient>
+        <linearGradient id="logoDroplet" x1="50%" y1="0%" x2="50%" y2="100%">
+          <stop offset="0%" stopColor="#f4c896" />
+          <stop offset="100%" stopColor="#8b5e34" />
+        </linearGradient>
+        <linearGradient id="logoHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
+          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="112" fill="url(#logoBg)" />
+      <path d="M256 110 C 256 110, 380 245, 380 340 C 380 410, 324 462, 256 462 C 188 462, 132 410, 132 340 C 132 245, 256 110, 256 110 Z" fill="url(#logoDroplet)" />
+      <ellipse cx="210" cy="280" rx="38" ry="55" fill="url(#logoHighlight)" transform="rotate(-25 210 280)" />
+    </svg>
+  );
+}
+
+// ====== BAC MATH (Widmark, per-drink elimination) ======
 const alcoholGrams = (mlVolume, pct) => mlVolume * (pct / 100) * ETHANOL_DENSITY;
 
-// Widmark with per-drink elimination:
-// each drink contributes (grams / (weight * r)) - elimination_rate * hours_since_THIS_drink,
-// floored at 0 (a single drink can't go negative). Total BAC is the sum.
 function calculateBAC(drinks, profile, atMs) {
   if (!drinks?.length) return 0;
   const r = profile.gender === 'male' ? R_MALE : R_FEMALE;
   let total = 0;
   for (const d of drinks) {
-    if (d.timestamp > atMs) continue; // future drink — skip
+    if (d.timestamp > atMs) continue;
     const peak = alcoholGrams(d.volumeMl, d.alcoholPct) / (profile.weight * r);
     const hoursSince = (atMs - d.timestamp) / 3600000;
     const remaining = peak - ELIMINATION_RATE * hoursSince;
@@ -95,72 +114,89 @@ function projectSeries(drinks, profile, fromMs, toMs, stepMs = 10 * 60 * 1000) {
 const timeUntilSafe = (currentBAC, limit) =>
   currentBAC <= limit ? 0 : ((currentBAC - limit) / ELIMINATION_RATE) * 3600000;
 
-const fmtDur = (ms) => {
-  if (ms <= 0) return '—';
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  return h === 0 ? `${m} хв` : `${h} год ${m} хв`;
-};
-const fmtTime = (ms) =>
-  new Date(ms).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-const fmtDayShort = (ms) =>
-  new Date(ms).toLocaleDateString('uk-UA', { day: '2-digit', month: 'short' });
-const fmtDayLong = (ms) =>
-  new Date(ms).toLocaleDateString('uk-UA', { day: 'numeric', month: 'long', weekday: 'long' });
+// ====== FORMATTERS (i18n-aware where it matters) ======
+function useDur() {
+  // Localized "X хв" / "X год Y хв" — uses the time.relMinAgo/Hour as building blocks would be wrong;
+  // duration is its own thing, so we keep simple inline labels.
+  const { locale } = useT();
+  return (ms) => {
+    if (ms <= 0) return '—';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    if (locale === 'en') return h === 0 ? `${m} min` : `${h} h ${m} min`;
+    return h === 0 ? `${m} хв` : `${h} год ${m} хв`;
+  };
+}
+
+function useFmt() {
+  const { locale } = useT();
+  const lc = locale === 'en' ? 'en-GB' : 'uk-UA';
+  return {
+    time: (ms) => new Date(ms).toLocaleTimeString(lc, { hour: '2-digit', minute: '2-digit' }),
+    dayShort: (ms) => new Date(ms).toLocaleDateString(lc, { day: '2-digit', month: 'short' }),
+    dayLong: (ms) => new Date(ms).toLocaleDateString(lc, { day: 'numeric', month: 'long', weekday: 'long' }),
+  };
+}
+
 const dayKey = (ms) => {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// Format ms → "YYYY-MM-DDTHH:MM" string for <input type="datetime-local">
 const toLocalInput = (ms) => {
   const d = new Date(ms);
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-// Parse local input string → ms timestamp
 const fromLocalInput = (str) => new Date(str).getTime();
 
-// Friendly relative time — "5 хв тому", "2 год тому", "вчора 21:30"
-const fmtRelative = (ms) => {
-  const diff = Date.now() - ms;
-  if (diff < 0) return `у майбутньому · ${fmtTime(ms)}`;
-  if (diff < 60000) return 'щойно';
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins} хв тому`;
-  const hours = Math.floor(diff / 3600000);
-  if (hours < 24) return `${hours} год тому · ${fmtTime(ms)}`;
-  const days = Math.floor(diff / 86400000);
-  if (days === 1) return `вчора · ${fmtTime(ms)}`;
-  if (days < 7) return `${days} дн тому · ${fmtTime(ms)}`;
-  return `${fmtDayShort(ms)} · ${fmtTime(ms)}`;
-};
+function useFmtRelative() {
+  const { t } = useT();
+  const fmt = useFmt();
+  return (ms) => {
+    const diff = Date.now() - ms;
+    if (diff < 0) return t('time.relInFuture', { time: fmt.time(ms) });
+    if (diff < 60000) return t('time.relJustNow');
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return t('time.relMinAgo', { n: mins });
+    const hours = Math.floor(diff / 3600000);
+    if (hours < 24) return t('time.relHourAgo', { n: hours, time: fmt.time(ms) });
+    const days = Math.floor(diff / 86400000);
+    if (days === 1) return t('time.relYesterday', { time: fmt.time(ms) });
+    if (days < 7) return t('time.relDaysAgo', { n: days, time: fmt.time(ms) });
+    return `${fmt.dayShort(ms)} · ${fmt.time(ms)}`;
+  };
+}
 
-// Compute UK CMO-style weekly stats over a rolling 7-day window ending at `nowMs`.
-// Returns: total grams, drinking days count, biggest single day grams, binge days count.
+// Resolve drink display name: prefer explicit `name`, else translate `nameKey`.
+function drinkName(drink, t) {
+  if (drink.name) return drink.name;
+  if (drink.nameKey) return t(drink.nameKey);
+  return '—';
+}
+
+// Weekly stats over rolling 7 days
 function computeWeeklyStats(drinks, profile, nowMs) {
   const weekAgo = nowMs - 7 * 86400000;
   const inWindow = drinks.filter(d => d.timestamp >= weekAgo && d.timestamp <= nowMs);
-
   const byDay = {};
   for (const d of inWindow) {
     const k = dayKey(d.timestamp);
     byDay[k] = (byDay[k] || 0) + alcoholGrams(d.volumeMl, d.alcoholPct);
   }
-
   const totalGrams   = Object.values(byDay).reduce((s, v) => s + v, 0);
   const drinkingDays = Object.keys(byDay).length;
   const dryDays      = 7 - drinkingDays;
   const biggestDay   = Math.max(0, ...Object.values(byDay));
-
   const bingeThreshold = profile?.gender === 'female' ? UK_BINGE_GRAMS_FEMALE : UK_BINGE_GRAMS_MALE;
   const bingeDays = Object.values(byDay).filter(g => g >= bingeThreshold).length;
-
   return { totalGrams, drinkingDays, dryDays, biggestDay, bingeDays, bingeThreshold };
 }
 
 // ====== APP ======
 export default function App() {
+  const { t } = useT();
+
   const [profile, setProfile] = useState(null);
   const [drinks, setDrinks] = useState([]);
   const [customPresets, setCustomPresets] = useState([]);
@@ -168,7 +204,8 @@ export default function App() {
   const [consented, setConsented] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
-  const [timePickerFor, setTimePickerFor] = useState(null); // preset object when picking time
+  const [timePickerFor, setTimePickerFor] = useState(null);
+  const [editingDrink, setEditingDrink] = useState(null);  // <- new: edit modal state
   const [statsRange, setStatsRange] = useState('day');
   const [selectedDay, setSelectedDay] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -176,8 +213,7 @@ export default function App() {
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href =
-      'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap';
+    link.href = 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap';
     document.head.appendChild(link);
     return () => { try { document.head.removeChild(link); } catch {} };
   }, []);
@@ -218,10 +254,10 @@ export default function App() {
   }, [currentBAC, limit, now, profile]);
 
   const status = useMemo(() => {
-    if (currentBAC === 0)    return { label: 'Тверезий',           fg: C.ok,   bg: C.okSoft,   ring: '#bce5cf' };
-    if (currentBAC <= limit) return { label: 'Можна за кермо',     fg: C.ok,   bg: C.okSoft,   ring: '#bce5cf' };
-    if (currentBAC <= 1.5)   return { label: 'Не сідай за кермо',  fg: C.warn, bg: C.warnSoft, ring: '#f0d49a' };
-    return                          { label: 'Небезпечний рівень', fg: C.bad,  bg: C.badSoft,  ring: '#f3b3b3' };
+    if (currentBAC === 0)    return { labelKey: 'status.sober',    fg: C.ok,   bg: C.okSoft,   ring: '#bce5cf' };
+    if (currentBAC <= limit) return { labelKey: 'status.ok',       fg: C.ok,   bg: C.okSoft,   ring: '#bce5cf' };
+    if (currentBAC <= 1.5)   return { labelKey: 'status.noDrive',  fg: C.warn, bg: C.warnSoft, ring: '#f0d49a' };
+    return                          { labelKey: 'status.danger',   fg: C.bad,  bg: C.badSoft,  ring: '#f3b3b3' };
   }, [currentBAC, limit]);
 
   const chartData = useMemo(() => {
@@ -235,7 +271,11 @@ export default function App() {
     return projectSeries(drinks, profile, start, end);
   }, [drinks, profile, now, currentBAC]);
 
-  const allPresets = useMemo(() => [...BUILTIN_PRESETS, ...customPresets], [customPresets]);
+  // Translate built-in preset names; custom presets keep their literal name.
+  const allPresets = useMemo(() => {
+    const builtins = BUILTIN_PRESETS.map(p => ({ ...p, name: t(p.nameKey) }));
+    return [...builtins, ...customPresets];
+  }, [customPresets, t]);
 
   const addDrink = (preset, customTime = null) => {
     setDrinks(prev => [...prev, {
@@ -249,6 +289,12 @@ export default function App() {
     setNow(Date.now());
   };
   const removeDrink = (id) => setDrinks(prev => prev.filter(d => d.id !== id));
+
+  // Update existing drink — handles both id-based merge and full replace.
+  const updateDrink = (id, patch) => {
+    setDrinks(prev => prev.map(d => d.id === id ? { ...d, ...patch } : d));
+    setNow(Date.now());
+  };
 
   const saveCustomPreset = (preset) => {
     setCustomPresets(prev => [...prev, {
@@ -269,7 +315,7 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center"
            style={{ background: C.bg, color: C.inkSoft, fontFamily: "'DM Sans', sans-serif" }}>
-        Завантаження…
+        {t('loading')}
       </div>
     );
   }
@@ -283,6 +329,10 @@ export default function App() {
         drinks={drinks.filter(d => dayKey(d.timestamp) === dayKey(selectedDay))}
         onBack={() => setSelectedDay(null)}
         onRemove={removeDrink}
+        onEdit={setEditingDrink}
+        editingDrink={editingDrink}
+        onCloseEdit={() => setEditingDrink(null)}
+        onSaveEdit={(patch) => { updateDrink(editingDrink.id, patch); setEditingDrink(null); }}
       />
     );
   }
@@ -307,14 +357,13 @@ export default function App() {
         {/* Header */}
         <header className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-                 style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})` }}>
-              <Droplet className="w-4 h-4" strokeWidth={2.5} style={{ color: C.amberSoft }} />
-            </div>
+            <DropLogo size={36} />
             <div>
-              <div className="text-lg font-bold tracking-tight leading-none" style={{ color: C.ink }}>Sobrius</div>
+              <div className="text-lg font-bold tracking-tight leading-none" style={{ color: C.ink }}>
+                {t('appName')}
+              </div>
               <div className="text-[10px] uppercase tracking-[0.18em] mt-1 font-medium" style={{ color: C.inkMute }}>
-                Контроль алкоголю
+                {t('appTagline')}
               </div>
             </div>
           </div>
@@ -325,78 +374,46 @@ export default function App() {
           >
             <User className="w-3.5 h-3.5" style={{ color: C.amber }} />
             <span className="hidden sm:inline">
-              {profile ? `${profile.gender === 'male' ? 'Ч' : 'Ж'} · ${profile.weight} кг` : 'Профіль'}
+              {profile ? `${profile.gender === 'male' ? (t('profile.male')[0]) : (t('profile.female')[0])} · ${profile.weight} ${t('profile.weight').includes('kg') ? 'kg' : 'кг'}` : t('profile.title')}
             </span>
             <Settings className="w-3.5 h-3.5" style={{ color: C.inkMute }} />
           </button>
         </header>
 
         {/* Hero BAC */}
-        <section className="card rounded-3xl p-6 sm:p-7 mb-4"
-                 style={{ boxShadow: `0 0 0 2px ${status.ring}, 0 1px 2px rgba(120,80,30,0.04)` }}>
-          <div className="flex items-baseline justify-between mb-2">
-            <div className="text-[11px] uppercase tracking-[0.2em] font-semibold" style={{ color: C.inkMute }}>
-              Поточний рівень
-            </div>
-            <div className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                 style={{ background: status.bg, color: status.fg }}>
-              {status.label}
-            </div>
-          </div>
-          <div className="flex items-end gap-2">
-            <div className="num-tabular text-7xl sm:text-8xl leading-none font-bold tracking-tight"
-                 style={{ color: status.fg }}>
-              {currentBAC.toFixed(2)}
-            </div>
-            <div className="text-lg pb-3 font-medium" style={{ color: C.inkMute }}>‰</div>
-          </div>
+        <HeroBAC
+          currentBAC={currentBAC}
+          limit={limit}
+          safeAt={safeAt}
+          now={now}
+          status={status}
+        />
 
-          <div className="grid grid-cols-2 gap-3 mt-5 pt-5"
-               style={{ borderTop: `1px solid ${C.border}` }}>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider mb-1 font-semibold" style={{ color: C.inkMute }}>
-                Дозволена межа
-              </div>
-              <div className="num-tabular font-medium" style={{ color: C.ink }}>{limit.toFixed(2)} ‰</div>
-            </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-wider mb-1 font-semibold" style={{ color: C.inkMute }}>
-                Можна за кермо
-              </div>
-              <div className="num-tabular font-medium text-sm" style={{ color: C.ink }}>
-                {safeAt
-                  ? <>через <span className="font-semibold" style={{ color: C.amberDeep }}>{fmtDur(safeAt - now)}</span> · {fmtTime(safeAt)}</>
-                  : <span className="font-semibold" style={{ color: C.ok }}>зараз ✓</span>}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Weekly UK CMO tracker — always visible */}
+        {/* Weekly UK CMO tracker */}
         <WeeklyTracker drinks={drinks} profile={profile} now={now} />
 
         {/* Chart */}
         {drinks.length > 0 && (
           <section className="card rounded-3xl p-5 mb-4">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold" style={{ color: C.ink }}>Прогноз на сьогодні</h2>
+              <h2 className="text-base font-bold" style={{ color: C.ink }}>{t('chart.title')}</h2>
               <div className="text-[10px] uppercase tracking-wider flex items-center gap-1.5 font-semibold"
                    style={{ color: C.inkMute }}>
-                <Clock className="w-3 h-3" /> в реальному часі
+                <Clock className="w-3 h-3" /> {t('chart.realtime')}
               </div>
             </div>
             <BACChart data={chartData} now={now} limit={limit} safeAt={safeAt} />
             <div className="flex flex-wrap gap-x-5 gap-y-1.5 mt-3 text-[11px] font-medium" style={{ color: C.inkSoft }}>
-              <Legend color={C.amber} label="Рівень BAC" />
-              <Legend color={C.bad} label="Дозволена межа" dashed />
-              <Legend color={C.ok} label="Можна за кермо" dot />
+              <Legend color={C.amber} label={t('chart.bacLevel')} />
+              <Legend color={C.bad} label={t('chart.legalLimit')} dashed />
+              <Legend color={C.ok} label={t('chart.canDrive')} dot />
             </div>
           </section>
         )}
 
         {/* Add drink */}
         <section className="mb-4">
-          <h2 className="text-base font-bold mb-3 px-1" style={{ color: C.ink }}>Додати напій</h2>
+          <h2 className="text-base font-bold mb-3 px-1" style={{ color: C.ink }}>{t('add.title')}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {allPresets.map(p => (
               <DrinkButton
@@ -415,18 +432,14 @@ export default function App() {
                    style={{ background: C.amberSoft }}>
                 <Plus className="w-4 h-4" strokeWidth={2.5} style={{ color: C.amberDeep }} />
               </div>
-              <div className="text-sm font-semibold" style={{ color: C.ink }}>Інший</div>
-              <div className="text-[11px] mt-0.5" style={{ color: C.inkMute }}>свій напій</div>
+              <div className="text-sm font-semibold" style={{ color: C.ink }}>{t('add.other')}</div>
+              <div className="text-[11px] mt-0.5" style={{ color: C.inkMute }}>{t('add.ownDrink')}</div>
             </button>
           </div>
           {customPresets.length > 0 && (
-            <p className="text-[11px] mt-2 px-1" style={{ color: C.inkMute }}>
-              Утримуйте свій напій, щоб видалити з пресетів
-            </p>
+            <p className="text-[11px] mt-2 px-1" style={{ color: C.inkMute }}>{t('add.hintRemovePreset')}</p>
           )}
-          <p className="text-[11px] mt-1 px-1" style={{ color: C.inkMute }}>
-            Натисніть на 🕐 у куточку напою, щоб обрати дату й час
-          </p>
+          <p className="text-[11px] mt-1 px-1" style={{ color: C.inkMute }}>{t('add.hintClock')}</p>
         </section>
 
         {/* Stats */}
@@ -436,17 +449,17 @@ export default function App() {
           setRange={setStatsRange}
           now={now}
           onRemove={removeDrink}
+          onEdit={setEditingDrink}
           onSelectDay={setSelectedDay}
         />
 
         <footer className="mt-8 text-center text-[10px] tracking-wide leading-relaxed px-2"
                 style={{ color: C.inkMute }}>
-          Розрахунки за формулою Відмарка — це наближена оцінка. Індивідуальні
-          фактори (їжа, ліки, здоров'я, темп пиття) можуть суттєво змінити реальний рівень.
+          {t('footer1')}
           <br />
-          <strong style={{ color: C.inkSoft }}>Цей застосунок не може замінити справжній алкотестер чи аналіз крові.</strong>
+          <strong style={{ color: C.inkSoft }}>{t('footer2')}</strong>
           <br />
-          Ніколи не покладайтесь на калькулятор для рішення сідати за кермо.
+          {t('footer3')}
         </footer>
       </div>
 
@@ -462,8 +475,8 @@ export default function App() {
       {showCustom && (
         <CustomDrinkModal
           onClose={() => setShowCustom(false)}
-          onAdd={(d, t, save) => {
-            addDrink(d, t);
+          onAdd={(d, ts, save) => {
+            addDrink(d, ts);
             if (save) saveCustomPreset(d);
             setShowCustom(false);
           }}
@@ -480,12 +493,75 @@ export default function App() {
           }}
         />
       )}
+
+      {editingDrink && (
+        <EditDrinkModal
+          drink={editingDrink}
+          onClose={() => setEditingDrink(null)}
+          onSave={(patch) => { updateDrink(editingDrink.id, patch); setEditingDrink(null); }}
+          onDelete={() => { removeDrink(editingDrink.id); setEditingDrink(null); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ====== HERO BAC (separate so we can call useT cleanly inside) ======
+function HeroBAC({ currentBAC, limit, safeAt, now, status }) {
+  const { t } = useT();
+  const fmt = useFmt();
+  const dur = useDur();
+
+  return (
+    <section className="card rounded-3xl p-6 sm:p-7 mb-4"
+             style={{ boxShadow: `0 0 0 2px ${status.ring}, 0 1px 2px rgba(120,80,30,0.04)` }}>
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[11px] uppercase tracking-[0.2em] font-semibold" style={{ color: C.inkMute }}>
+          {t('hero.currentLevel')}
+        </div>
+        <div className="text-xs font-semibold px-2.5 py-1 rounded-full"
+             style={{ background: status.bg, color: status.fg }}>
+          {t(status.labelKey)}
+        </div>
+      </div>
+      <div className="flex items-end gap-2">
+        <div className="num-tabular text-7xl sm:text-8xl leading-none font-bold tracking-tight"
+             style={{ color: status.fg }}>
+          {currentBAC.toFixed(2)}
+        </div>
+        <div className="text-lg pb-3 font-medium" style={{ color: C.inkMute }}>‰</div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mt-5 pt-5" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider mb-1 font-semibold" style={{ color: C.inkMute }}>
+            {t('hero.legalLimit')}
+          </div>
+          <div className="num-tabular font-medium" style={{ color: C.ink }}>{limit.toFixed(2)} ‰</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider mb-1 font-semibold" style={{ color: C.inkMute }}>
+            {t('hero.canDrive')}
+          </div>
+          <div className="num-tabular font-medium text-sm" style={{ color: C.ink }}>
+            {safeAt
+              ? <span dangerouslySetInnerHTML={{
+                  __html: t('hero.canDriveIn', {
+                    dur: `<span style="color:${C.amberDeep};font-weight:600">${dur(safeAt - now)}</span>`,
+                    time: fmt.time(safeAt)
+                  })
+                }} />
+              : <span className="font-semibold" style={{ color: C.ok }}>{t('hero.canDriveNow')}</span>}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
 // ====== DRINK BUTTON ======
 function DrinkButton({ preset, onTap, onPickTime, onLongPress }) {
+  const { t } = useT();
   const [pressing, setPressing] = useState(false);
   const timer = React.useRef(null);
 
@@ -493,7 +569,7 @@ function DrinkButton({ preset, onTap, onPickTime, onLongPress }) {
     if (!onLongPress) return;
     setPressing(true);
     timer.current = setTimeout(() => {
-      if (confirm(`Видалити "${preset.name}" з пресетів?`)) onLongPress();
+      if (confirm(t('confirm.removePreset', { name: preset.name }))) onLongPress();
       setPressing(false);
     }, 600);
   };
@@ -507,7 +583,6 @@ function DrinkButton({ preset, onTap, onPickTime, onLongPress }) {
       className="card card-hover rounded-2xl p-3 transition relative"
       style={pressing ? { boxShadow: `0 0 0 2px ${C.amber}` } : {}}
     >
-      {/* Main tap area — adds drink "now" */}
       <button
         onClick={onTap}
         onTouchStart={start}
@@ -523,24 +598,21 @@ function DrinkButton({ preset, onTap, onPickTime, onLongPress }) {
           {preset.name}
         </div>
         <div className="text-[11px] mt-0.5 num-tabular font-medium" style={{ color: C.inkMute }}>
-          {preset.volumeMl} мл · {preset.alcoholPct}%
+          {preset.volumeMl} {t('stats.volumeMl').includes('ml') ? 'ml' : 'мл'} · {preset.alcoholPct}%
         </div>
       </button>
 
-      {/* Star marker for custom presets (top-right when no clock would be there) */}
       {!preset.builtin && (
-        <Star className="absolute top-2 left-2 w-3 h-3"
-              style={{ color: C.amber, fill: C.amber }} />
+        <Star className="absolute top-2 left-2 w-3 h-3" style={{ color: C.amber, fill: C.amber }} />
       )}
 
-      {/* Clock — open time picker */}
       <button
         onClick={(e) => { e.stopPropagation(); onPickTime(); }}
         className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition active:scale-90"
         style={{ background: '#f5ead0', color: C.amberDeep }}
         onMouseEnter={(e) => e.currentTarget.style.background = C.amberSoft}
         onMouseLeave={(e) => e.currentTarget.style.background = '#f5ead0'}
-        aria-label="Обрати час"
+        aria-label="time"
       >
         <CalendarClock className="w-3.5 h-3.5" strokeWidth={2.2} />
       </button>
@@ -548,107 +620,44 @@ function DrinkButton({ preset, onTap, onPickTime, onLongPress }) {
   );
 }
 
-// ====== CONSENT ======
-function ConsentScreen({ onAccept }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center px-5 py-8"
-         style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
-      <div className="rounded-3xl p-7 sm:p-9 max-w-md w-full"
-           style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 4px 16px rgba(120,80,30,0.06)' }}>
-        <div className="w-12 h-12 rounded-full flex items-center justify-center mb-5 mx-auto"
-             style={{ background: C.amberSoft }}>
-          <ShieldAlert className="w-6 h-6" style={{ color: C.amberDeep }} />
-        </div>
-        <h1 className="text-3xl text-center mb-2 font-bold tracking-tight" style={{ color: C.ink }}>Перш ніж почати</h1>
-        <p className="text-center text-sm mb-6" style={{ color: C.inkSoft }}>Будь ласка, прочитайте уважно</p>
-
-        <div className="space-y-3 text-sm leading-relaxed" style={{ color: C.inkSoft }}>
-          <p>
-            <strong style={{ color: C.ink }}>Лише для повнолітніх (18+).</strong>{' '}
-            Цей застосунок не призначений для неповнолітніх.
-          </p>
-          <p>
-            <strong style={{ color: C.ink }}>Це оцінка, а не вимірювання.</strong>{' '}
-            Розрахунок робиться за формулою Відмарка на базі ваших даних і журналу напоїв.
-            Реальний рівень алкоголю в крові залежить від багатьох індивідуальних
-            факторів і може суттєво відрізнятися.
-          </p>
-          <p>
-            <strong style={{ color: C.ink }}>Не для рішень про водіння.</strong>{' '}
-            Жоден програмний калькулятор не замінює сертифікований алкотестер чи
-            аналіз крові. Ніколи не сідайте за кермо, спираючись лише на цю оцінку.
-          </p>
-          <p className="text-xs pt-3" style={{ color: C.inkMute, borderTop: `1px solid ${C.border}` }}>
-            Натискаючи «Розумію та погоджуюсь», ви підтверджуєте, що вам виповнилось 18 років,
-            і ви усвідомлюєте обмеження точності цього застосунку.
-          </p>
-        </div>
-
-        <button
-          onClick={onAccept}
-          className="w-full mt-6 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
-          style={{
-            background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`,
-            color: '#fff8eb'
-          }}
-        >
-          <Check className="w-4 h-4" /> Розумію та погоджуюсь
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ====== WEEKLY TRACKER (UK CMO guidelines) ======
+// ====== WEEKLY TRACKER (UK CMO) ======
 function WeeklyTracker({ drinks, profile, now }) {
-  const stats = useMemo(
-    () => computeWeeklyStats(drinks, profile, now),
-    [drinks, profile, now]
-  );
-
+  const { t } = useT();
+  const stats = useMemo(() => computeWeeklyStats(drinks, profile, now), [drinks, profile, now]);
   const { totalGrams, drinkingDays, dryDays, biggestDay, bingeDays, bingeThreshold } = stats;
   const percent = (totalGrams / UK_WEEKLY_GRAMS) * 100;
 
-  // Risk band per UK classification
-  // < 14 units (112g): low risk (green)
-  // 14-35 units (112-280g): increasing risk (amber)
-  // > 35 units (280g): higher risk (red)
   let bandColor, bandSoft, bandLabel, bandIcon;
   if (totalGrams === 0) {
-    bandColor = C.ok;     bandSoft = C.okSoft;   bandLabel = 'Тиждень без алкоголю'; bandIcon = '🌿';
+    bandColor = C.ok;   bandSoft = C.okSoft;   bandLabel = t('weekly.bandSober');      bandIcon = '🌿';
   } else if (totalGrams <= UK_WEEKLY_GRAMS) {
-    bandColor = C.ok;     bandSoft = C.okSoft;   bandLabel = 'У межах низького ризику'; bandIcon = '✓';
+    bandColor = C.ok;   bandSoft = C.okSoft;   bandLabel = t('weekly.bandLow');        bandIcon = '✓';
   } else if (totalGrams <= UK_INCREASING_RISK_GRAMS) {
-    bandColor = C.warn;   bandSoft = C.warnSoft; bandLabel = 'Підвищений ризик';      bandIcon = '⚠';
+    bandColor = C.warn; bandSoft = C.warnSoft; bandLabel = t('weekly.bandIncreasing'); bandIcon = '⚠';
   } else {
-    bandColor = C.bad;    bandSoft = C.badSoft;  bandLabel = 'Високий ризик';         bandIcon = '⚠';
+    bandColor = C.bad;  bandSoft = C.badSoft;  bandLabel = t('weekly.bandHigh');       bandIcon = '⚠';
   }
 
-  // Spread quality (UK suggests 3+ drinking days = good distribution)
   let spreadHint = null;
   if (totalGrams > 0) {
     if (drinkingDays === 1 && totalGrams >= UK_WEEKLY_GRAMS / 2) {
-      spreadHint = { text: 'Все за один день — спробуйте розподілити', color: C.warn };
+      spreadHint = { text: t('weekly.hintAllOneDay'), color: C.warn };
     } else if (drinkingDays >= 3 && totalGrams <= UK_WEEKLY_GRAMS) {
-      spreadHint = { text: `Розподілено на ${drinkingDays} дні — добре`, color: C.ok };
+      spreadHint = { text: t('weekly.hintGoodSpread', { n: drinkingDays }), color: C.ok };
     } else if (drinkingDays === 7) {
-      spreadHint = { text: 'Жодного «сухого» дня цього тижня', color: C.warn };
+      spreadHint = { text: t('weekly.hintNoDryDays'), color: C.warn };
     }
   }
 
-  // Tooltip / explanation toggle
   const [expanded, setExpanded] = useState(false);
-
-  // Cap progress at 200% visually
   const visualPct = Math.min(200, percent);
-  // Markers on the bar at 100% (low risk limit) — bar uses 0-200% scale
-  const lowRiskMarkPct = (UK_WEEKLY_GRAMS / (UK_WEEKLY_GRAMS * 2)) * 100; // 50%
+  const lowRiskMarkPct = 50;
 
   return (
     <section className="card rounded-3xl p-5 sm:p-6 mb-4">
       <div className="flex items-baseline justify-between mb-1">
         <div className="flex items-center gap-2">
-          <h2 className="text-base font-bold" style={{ color: C.ink }}>Тижнева норма</h2>
+          <h2 className="text-base font-bold" style={{ color: C.ink }}>{t('weekly.title')}</h2>
           <button
             onClick={() => setExpanded(v => !v)}
             className="text-[10px] uppercase tracking-wider font-semibold rounded-full px-2 py-0.5 transition"
@@ -668,10 +677,10 @@ function WeeklyTracker({ drinks, profile, now }) {
           <div className="num-tabular text-4xl sm:text-5xl leading-none font-bold tracking-tight"
                style={{ color: bandColor }}>
             {totalGrams.toFixed(0)}
-            <span className="text-xl font-medium" style={{ color: C.inkMute }}> / {UK_WEEKLY_GRAMS} г</span>
+            <span className="text-xl font-medium" style={{ color: C.inkMute }}> / {UK_WEEKLY_GRAMS} {t('stats.alcoholG').includes('Alc') ? 'g' : 'г'}</span>
           </div>
           <div className="text-[11px] mt-1.5 font-medium" style={{ color: C.inkSoft }}>
-            за останні 7 днів · {(totalGrams / 8).toFixed(1)} од. з 14
+            {t('weekly.lastSevenDays', { units: (totalGrams / 8).toFixed(1) })}
           </div>
         </div>
         <div className="text-right">
@@ -679,47 +688,44 @@ function WeeklyTracker({ drinks, profile, now }) {
             {percent.toFixed(0)}%
           </div>
           <div className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkMute }}>
-            від норми
+            {t('weekly.ofLimit')}
           </div>
         </div>
       </div>
 
-      {/* Progress bar with marker at 100% (low-risk limit) */}
       <div className="relative h-3 rounded-full overflow-hidden mb-1" style={{ background: '#f0e3c8' }}>
         <div className="h-full rounded-full transition-all"
              style={{ width: `${(visualPct / 200) * 100}%`, background: bandColor }} />
-        {/* Marker at 100% of low-risk (= 50% of visual scale) */}
         <div className="absolute top-0 bottom-0 w-px"
              style={{ left: `${lowRiskMarkPct}%`, background: 'rgba(60,40,15,0.3)' }} />
       </div>
       <div className="flex justify-between text-[9px] num-tabular font-semibold mb-3" style={{ color: C.inkMute }}>
         <span>0</span>
-        <span style={{ marginLeft: '-12px' }}>112 г · норма</span>
+        <span style={{ marginLeft: '-12px' }}>{t('weekly.norm', { g: 112 })}</span>
         <span>224+</span>
       </div>
 
-      {/* Three sub-indicators */}
       <div className="grid grid-cols-3 gap-2">
         <SubMetric
-          label="Сухих днів"
+          label={t('weekly.dryDays')}
           value={dryDays}
           good={dryDays >= 2}
           warn={dryDays === 0 && totalGrams > 0}
-          subtitle="з 7"
+          subtitle={t('weekly.ofSeven')}
         />
         <SubMetric
-          label="Найбільший день"
-          value={`${biggestDay.toFixed(0)} г`}
+          label={t('weekly.biggestDay')}
+          value={`${biggestDay.toFixed(0)} ${t('stats.alcoholG').includes('Alc') ? 'g' : 'г'}`}
           good={biggestDay > 0 && biggestDay < bingeThreshold}
           warn={biggestDay >= bingeThreshold}
-          subtitle={biggestDay >= bingeThreshold ? '⚠ багато' : `< ${bingeThreshold} г ок`}
+          subtitle={biggestDay >= bingeThreshold ? t('weekly.tooMuch') : t('weekly.withinSafe', { g: bingeThreshold })}
         />
         <SubMetric
-          label="Днів з ризиком"
+          label={t('weekly.riskDays')}
           value={bingeDays}
           good={bingeDays === 0 && totalGrams > 0}
           warn={bingeDays > 0}
-          subtitle={bingeDays > 0 ? 'binge' : 'нема'}
+          subtitle={bingeDays > 0 ? t('weekly.bingeShort') : t('weekly.noBinge')}
         />
       </div>
 
@@ -733,19 +739,14 @@ function WeeklyTracker({ drinks, profile, now }) {
       {expanded && (
         <div className="mt-4 pt-4 text-[11px] leading-relaxed space-y-2"
              style={{ color: C.inkSoft, borderTop: `1px solid ${C.border}` }}>
-          <p>
-            <strong style={{ color: C.ink }}>UK Chief Medical Officers</strong> рекомендують
-            не більше <strong>14 одиниць</strong> алкоголю на тиждень (≈112 г чистого спирту),
-            однаково для чоловіків і жінок.
-          </p>
-          <p>
-            Краще розподілити на <strong>3 і більше дні</strong>, з кількома днями повністю без алкоголю.
-            Уникати <strong>надмірного споживання за один раз</strong> (понад {bingeThreshold} г для
-            {profile?.gender === 'female' ? ' жінок' : ' чоловіків'}).
-          </p>
-          <p style={{ color: C.inkMute }}>
-            1 одиниця = 8 г чистого етанолу = пів пінти пива 4% / маленький келих вина 12% / 25 мл міцного 40%.
-          </p>
+          <p dangerouslySetInnerHTML={{ __html: t('weekly.explainP1') }} />
+          <p dangerouslySetInnerHTML={{
+            __html: t('weekly.explainP2', {
+              threshold: bingeThreshold,
+              gender: profile?.gender === 'female' ? t('weekly.genderWomen') : t('weekly.genderMen')
+            })
+          }} />
+          <p style={{ color: C.inkMute }}>{t('weekly.explainP3')}</p>
         </div>
       )}
     </section>
@@ -772,6 +773,7 @@ const SubMetric = ({ label, value, subtitle, good, warn }) => {
 
 // ====== CHART ======
 function BACChart({ data, now, limit, safeAt }) {
+  const fmt = useFmt();
   if (!data.length) return null;
   const maxBac = Math.max(limit * 1.4, ...data.map(d => d.bac)) * 1.1;
 
@@ -788,7 +790,7 @@ function BACChart({ data, now, limit, safeAt }) {
           <CartesianGrid stroke={C.grid} vertical={false} />
           <XAxis
             dataKey="time" type="number" domain={['dataMin', 'dataMax']}
-            tickFormatter={fmtTime}
+            tickFormatter={fmt.time}
             stroke={C.inkMute} tick={{ fontSize: 10, fontFamily: 'DM Sans', fill: C.inkMute }}
             axisLine={false} tickLine={false}
           />
@@ -802,18 +804,14 @@ function BACChart({ data, now, limit, safeAt }) {
             contentStyle={{
               background: C.card, border: `1px solid ${C.border}`,
               borderRadius: 12, fontFamily: 'DM Sans', fontSize: 12,
-              color: C.ink,
-              boxShadow: '0 4px 12px rgba(120,80,30,0.08)'
+              color: C.ink, boxShadow: '0 4px 12px rgba(120,80,30,0.08)'
             }}
-            labelFormatter={(v) => fmtTime(v)} formatter={(v) => [`${v} ‰`, 'BAC']}
+            labelFormatter={(v) => fmt.time(v)} formatter={(v) => [`${v} ‰`, 'BAC']}
           />
           <ReferenceLine y={limit} stroke={C.bad} strokeDasharray="4 4" strokeOpacity={0.7} />
           <ReferenceLine x={now} stroke={C.inkMute} strokeDasharray="2 4" />
-          <Line
-            type="monotone" dataKey="bac"
-            stroke="url(#bacFill)" strokeWidth={2.5}
-            dot={false} isAnimationActive={false}
-          />
+          <Line type="monotone" dataKey="bac" stroke="url(#bacFill)" strokeWidth={2.5}
+                dot={false} isAnimationActive={false} />
           {safeAt && safeAt <= data[data.length - 1].time && (
             <ReferenceDot x={safeAt} y={limit} r={5} fill={C.ok} stroke={C.card} strokeWidth={2} />
           )}
@@ -839,8 +837,10 @@ const Legend = ({ color, label, dashed, dot }) => (
   </div>
 );
 
-// ====== STATS ======
-function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
+// ====== STATS PANEL ======
+function StatsPanel({ drinks, range, setRange, now, onRemove, onEdit, onSelectDay }) {
+  const { t, locale } = useT();
+
   const stats = useMemo(() => {
     const d = new Date(now);
     let from, daysInRange;
@@ -883,28 +883,23 @@ function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
       }
     }
 
-    return {
-      filtered: f, totalAlc, totalDrinks: f.length, totalVol,
-      grouped, dryDays, drinkingDays, avgPerDay, seriesDays, daysInRange
-    };
+    return { filtered: f, totalAlc, totalDrinks: f.length, totalVol, dryDays, drinkingDays, avgPerDay, seriesDays };
   }, [drinks, range, now]);
 
-  // Reference limits derived from UK CMO 14 units/week (= 112 g/week)
-  const ukLimit =
-    range === 'month' ? UK_WEEKLY_GRAMS * 4 :
-    range === 'year'  ? UK_WEEKLY_GRAMS * 52 : null;
+  const ukLimit = range === 'month' ? UK_WEEKLY_GRAMS * 4
+                : range === 'year'  ? UK_WEEKLY_GRAMS * 52 : null;
   const ukPercent = ukLimit ? (stats.totalAlc / ukLimit) * 100 : 0;
   const ukColor = ukPercent > 100 ? C.bad : ukPercent > 70 ? C.warn : C.ok;
 
   return (
     <section className="card rounded-3xl p-5">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-base font-bold" style={{ color: C.ink }}>Статистика</h2>
+        <h2 className="text-base font-bold" style={{ color: C.ink }}>{t('stats.title')}</h2>
         <div className="flex rounded-full p-1 text-xs" style={{ background: '#f0e3c8' }}>
           {[
-            { id: 'day',   label: 'День' },
-            { id: 'month', label: 'Місяць' },
-            { id: 'year',  label: 'Рік' }
+            { id: 'day',   label: t('stats.day') },
+            { id: 'month', label: t('stats.month') },
+            { id: 'year',  label: t('stats.year') }
           ].map(opt => (
             <button
               key={opt.id}
@@ -923,24 +918,24 @@ function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <Stat label="Напоїв"    value={stats.totalDrinks} />
-        <Stat label="Об'єм, мл" value={stats.totalVol.toFixed(0)} />
-        <Stat label="Спирт, г"  value={stats.totalAlc.toFixed(0)} highlight />
+        <Stat label={t('stats.drinks')} value={stats.totalDrinks} />
+        <Stat label={t('stats.volumeMl')} value={stats.totalVol.toFixed(0)} />
+        <Stat label={t('stats.alcoholG')} value={stats.totalAlc.toFixed(0)} highlight />
       </div>
 
       {range !== 'day' && (
         <>
           <div className="grid grid-cols-3 gap-2 mb-4">
-            <SmallStat label="Сухих днів"   value={stats.dryDays} />
-            <SmallStat label="З напоями"    value={stats.drinkingDays} />
-            <SmallStat label="Середнє/день" value={`${stats.avgPerDay.toFixed(1)} г`} />
+            <SmallStat label={t('stats.dryDays')}    value={stats.dryDays} />
+            <SmallStat label={t('stats.withDrinks')} value={stats.drinkingDays} />
+            <SmallStat label={t('stats.avgPerDay')}  value={`${stats.avgPerDay.toFixed(1)} ${t('stats.alcoholG').includes('Alc') ? 'g' : 'г'}`} />
           </div>
 
           {ukLimit && stats.totalAlc > 0 && (
             <div className="mb-4">
               <div className="flex justify-between text-[11px] mb-1.5 font-medium">
                 <span style={{ color: C.inkSoft }}>
-                  UK CMO норма (низький ризик): {ukLimit} г за {range === 'month' ? 'місяць' : 'рік'}
+                  {t('stats.ukNorm', { limit: ukLimit, period: t(range === 'month' ? 'stats.periodMonth' : 'stats.periodYear') })}
                 </span>
                 <span className="num-tabular font-semibold" style={{ color: ukColor }}>
                   {ukPercent.toFixed(0)}%
@@ -961,18 +956,19 @@ function StatsPanel({ drinks, range, setRange, now, onRemove, onSelectDay }) {
 
       {stats.filtered.length === 0 ? (
         <div className="text-center py-6 text-sm" style={{ color: C.inkMute }}>
-          {range === 'day' ? 'Сьогодні нічого не випито' :
-           range === 'month' ? 'Цього місяця нічого не випито' :
-                               'Цього року нічого не випито'}
+          {range === 'day' ? t('stats.emptyDay') :
+           range === 'month' ? t('stats.emptyMonth') :
+                               t('stats.emptyYear')}
         </div>
       ) : range === 'day' && (
         <div className="mt-2 space-y-1">
           <div className="text-[10px] uppercase tracking-wider mb-2 px-1 font-semibold" style={{ color: C.inkMute }}>
-            Список напоїв
+            {t('stats.drinkList')}
           </div>
           {[...stats.filtered].sort((a, b) => b.timestamp - a.timestamp).map(d => (
-            <DrinkRow key={d.id} drink={d} onRemove={() => onRemove(d.id)} />
+            <DrinkRow key={d.id} drink={d} onRemove={() => onRemove(d.id)} onEdit={() => onEdit(d)} />
           ))}
+          <p className="text-[10px] mt-2 px-1" style={{ color: C.inkMute }}>{t('stats.tapToEdit')}</p>
         </div>
       )}
     </section>
@@ -1003,26 +999,34 @@ const SmallStat = ({ label, value }) => (
   </div>
 );
 
-function DrinkRow({ drink, onRemove }) {
+// Drink row — now tap = edit, trash icon = quick delete
+function DrinkRow({ drink, onRemove, onEdit }) {
+  const { t } = useT();
+  const fmt = useFmt();
+  const isMl = !t('stats.volumeMl').includes('ml');
+  const mlLabel = isMl ? 'мл' : 'ml';
+  const gLabel = t('stats.alcoholG').includes('Alc') ? 'g' : 'г';
+
   return (
-    <div className="flex items-center gap-3 p-2.5 rounded-xl group transition"
+    <div className="flex items-center gap-3 p-2.5 rounded-xl group transition cursor-pointer"
+         onClick={onEdit}
          onMouseEnter={(e) => e.currentTarget.style.background = '#faf3e0'}
          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
-      <div className="num-tabular text-xs w-12 font-medium" style={{ color: C.inkMute }}>{fmtTime(drink.timestamp)}</div>
+      <div className="num-tabular text-xs w-12 font-medium" style={{ color: C.inkMute }}>{fmt.time(drink.timestamp)}</div>
       <div className="text-lg w-6">{drink.icon || '🥃'}</div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold truncate" style={{ color: C.ink }}>{drink.name}</div>
+        <div className="text-sm font-semibold truncate" style={{ color: C.ink }}>{drinkName(drink, t)}</div>
         <div className="text-[11px] num-tabular font-medium" style={{ color: C.inkMute }}>
-          {drink.volumeMl} мл · {drink.alcoholPct}% · {alcoholGrams(drink.volumeMl, drink.alcoholPct).toFixed(1)} г спирту
+          {drink.volumeMl} {mlLabel} · {drink.alcoholPct}% · {alcoholGrams(drink.volumeMl, drink.alcoholPct).toFixed(1)} {gLabel} {t('stats.gOfAlc').includes('alc') ? 'of alc' : 'спирту'}
         </div>
       </div>
       <button
-        onClick={onRemove}
+        onClick={(e) => { e.stopPropagation(); onRemove(); }}
         className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded-lg transition"
         style={{ color: C.bad }}
         onMouseEnter={(e) => e.currentTarget.style.background = C.badSoft}
         onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-        aria-label="Видалити"
+        aria-label="delete"
       >
         <Trash2 className="w-3.5 h-3.5" />
       </button>
@@ -1031,11 +1035,13 @@ function DrinkRow({ drink, onRemove }) {
 }
 
 function DayBars({ days, onTap }) {
+  const { t } = useT();
+  const fmt = useFmt();
   return (
     <div className="mb-4">
       <div className="text-[10px] uppercase tracking-wider mb-2 px-1 flex items-center gap-1.5 font-semibold"
            style={{ color: C.inkMute }}>
-        <BarChart3 className="w-3 h-3" /> Чистий етанол по днях (г) — натисніть стовпець для деталей
+        <BarChart3 className="w-3 h-3" /> {t('stats.ethanolByDay')}
       </div>
       <div className="h-32 -mx-1">
         <ResponsiveContainer width="100%" height="100%">
@@ -1060,10 +1066,10 @@ function DayBars({ days, onTap }) {
                 borderRadius: 10, fontFamily: 'DM Sans', fontSize: 11,
                 color: C.ink, boxShadow: '0 4px 12px rgba(120,80,30,0.08)'
               }}
-              formatter={(val, _, payload) => [
-                `${val.toFixed(1)} г · ${payload.payload.drinks} напоїв`,
-                fmtDayShort(payload.payload.ms)
-              ]}
+              formatter={(val, _, payload) => {
+                const drinkLabel = plural('uk', payload.payload.drinks, { one: 'напій', few: 'напої', many: 'напоїв' });
+                return [`${val.toFixed(1)} г · ${payload.payload.drinks} ${drinkLabel}`, fmt.dayShort(payload.payload.ms)];
+              }}
               labelFormatter={() => ''}
             />
             <Bar
@@ -1083,10 +1089,14 @@ function DayBars({ days, onTap }) {
 }
 
 // ====== DAY DETAIL ======
-function DayDetailScreen({ dayMs, drinks, onBack, onRemove }) {
+function DayDetailScreen({ dayMs, drinks, onBack, onRemove, onEdit, editingDrink, onCloseEdit, onSaveEdit }) {
+  const { t, locale } = useT();
+  const fmt = useFmt();
   const totalAlc = drinks.reduce((s, x) => s + alcoholGrams(x.volumeMl, x.alcoholPct), 0);
   const totalVol = drinks.reduce((s, x) => s + x.volumeMl, 0);
   const sorted = [...drinks].sort((a, b) => a.timestamp - b.timestamp);
+
+  const drinkLabel = plural(locale, drinks.length, t('drinkCount'));
 
   return (
     <div className="min-h-screen"
@@ -1104,32 +1114,78 @@ function DayDetailScreen({ dayMs, drinks, onBack, onRemove }) {
           onMouseEnter={(e) => e.currentTarget.style.background = '#fff8eb'}
           onMouseLeave={(e) => e.currentTarget.style.background = C.card}
         >
-          <ChevronLeft className="w-4 h-4" /> Назад
+          <ChevronLeft className="w-4 h-4" /> {t('stats.back')}
         </button>
 
         <h1 className="text-2xl font-bold tracking-tight mb-1 capitalize" style={{ color: C.ink }}>
-          {fmtDayLong(dayMs)}
+          {fmt.dayLong(dayMs)}
         </h1>
         <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
-          {drinks.length} {drinks.length === 1 ? 'напій' : drinks.length < 5 ? 'напої' : 'напоїв'}
+          {drinks.length} {drinkLabel}
         </p>
 
         <div className="grid grid-cols-3 gap-2 mb-5">
-          <Stat label="Напоїв"    value={drinks.length} />
-          <Stat label="Об'єм, мл" value={totalVol.toFixed(0)} />
-          <Stat label="Спирт, г"  value={totalAlc.toFixed(0)} highlight />
+          <Stat label={t('stats.drinks')} value={drinks.length} />
+          <Stat label={t('stats.volumeMl')} value={totalVol.toFixed(0)} />
+          <Stat label={t('stats.alcoholG')} value={totalAlc.toFixed(0)} highlight />
         </div>
 
         <div className="card rounded-2xl p-4">
           <div className="text-[10px] uppercase tracking-wider mb-3 px-1 font-semibold" style={{ color: C.inkMute }}>
-            Хронологія
+            {t('stats.timeline')}
           </div>
           <div className="space-y-1">
             {sorted.map(d => (
-              <DrinkRow key={d.id} drink={d} onRemove={() => onRemove(d.id)} />
+              <DrinkRow key={d.id} drink={d} onRemove={() => onRemove(d.id)} onEdit={() => onEdit(d)} />
             ))}
           </div>
+          <p className="text-[10px] mt-3 px-1" style={{ color: C.inkMute }}>{t('stats.tapToEdit')}</p>
         </div>
+      </div>
+
+      {editingDrink && (
+        <EditDrinkModal
+          drink={editingDrink}
+          onClose={onCloseEdit}
+          onSave={onSaveEdit}
+          onDelete={() => { onRemove(editingDrink.id); onCloseEdit(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ====== CONSENT ======
+function ConsentScreen({ onAccept }) {
+  const { t } = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center px-5 py-8"
+         style={{ background: C.bg, color: C.ink, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+      <div className="rounded-3xl p-7 sm:p-9 max-w-md w-full"
+           style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 4px 16px rgba(120,80,30,0.06)' }}>
+        <div className="w-12 h-12 rounded-full flex items-center justify-center mb-5 mx-auto"
+             style={{ background: C.amberSoft }}>
+          <ShieldAlert className="w-6 h-6" style={{ color: C.amberDeep }} />
+        </div>
+        <h1 className="text-3xl text-center mb-2 font-bold tracking-tight" style={{ color: C.ink }}>{t('consent.title')}</h1>
+        <p className="text-center text-sm mb-6" style={{ color: C.inkSoft }}>{t('consent.subtitle')}</p>
+
+        <div className="space-y-3 text-sm leading-relaxed" style={{ color: C.inkSoft }}>
+          <p dangerouslySetInnerHTML={{ __html: t('consent.adultOnly') }} />
+          <p dangerouslySetInnerHTML={{ __html: t('consent.estimateOnly') }} />
+          <p dangerouslySetInnerHTML={{ __html: t('consent.notForDriving') }} />
+          <p className="text-xs pt-3" style={{ color: C.inkMute, borderTop: `1px solid ${C.border}` }}>
+            {t('consent.acceptHint')}
+          </p>
+        </div>
+
+        <button
+          onClick={onAccept}
+          className="w-full mt-6 py-3.5 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
+          style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`, color: '#fff8eb' }}
+        >
+          <Check className="w-4 h-4" /> {t('consent.accept')}
+        </button>
       </div>
     </div>
   );
@@ -1137,6 +1193,7 @@ function DayDetailScreen({ dayMs, drinks, onBack, onRemove }) {
 
 // ====== PROFILE MODAL ======
 function ProfileModal({ profile, onClose, onSave, firstRun }) {
+  const { t } = useT();
   const [gender, setGender] = useState(profile.gender);
   const [weight, setWeight] = useState(profile.weight);
   const [legalLimit, setLegalLimit] = useState(profile.legalLimit);
@@ -1148,7 +1205,7 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
            style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 8px 32px rgba(60,40,15,0.2)' }}>
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-2xl font-bold tracking-tight" style={{ color: C.ink }}>
-            {firstRun ? 'Розкажіть про себе' : 'Профіль'}
+            {firstRun ? t('profile.tellAboutYou') : t('profile.title')}
           </h2>
           {!firstRun && (
             <button onClick={onClose} className="p-2 rounded-full transition"
@@ -1158,15 +1215,15 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
             </button>
           )}
         </div>
-        <p className="text-xs mb-6" style={{ color: C.inkSoft }}>Дані потрібні для точного розрахунку</p>
+        <p className="text-xs mb-6" style={{ color: C.inkSoft }}>{t('profile.reason')}</p>
 
         <div className="space-y-5">
           <div>
-            <label className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkSoft }}>Стать</label>
+            <label className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkSoft }}>{t('profile.gender')}</label>
             <div className="grid grid-cols-2 gap-2 mt-2">
               {[
-                { id: 'male', label: 'Чоловік' },
-                { id: 'female', label: 'Жінка' }
+                { id: 'male', label: t('profile.male') },
+                { id: 'female', label: t('profile.female') }
               ].map(opt => (
                 <button
                   key={opt.id}
@@ -1186,7 +1243,7 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
 
           <div>
             <label className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkSoft }}>
-              Вага · <span className="num-tabular" style={{ color: C.ink }}>{weight} кг</span>
+              {t('profile.weight', { w: weight })}
             </label>
             <input
               type="range" min="40" max="150" value={weight}
@@ -1195,12 +1252,12 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
               style={{ accentColor: C.amberDeep }}
             />
             <div className="flex justify-between text-[10px] num-tabular mt-1 font-medium" style={{ color: C.inkMute }}>
-              <span>40</span><span>150 кг</span>
+              <span>{t('profile.weightMin')}</span><span>{t('profile.weightMax')}</span>
             </div>
           </div>
 
           <div>
-            <label className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkSoft }}>Дозволена межа</label>
+            <label className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: C.inkSoft }}>{t('profile.legalLimit')}</label>
             <div className="grid grid-cols-4 gap-1.5 mt-2 text-xs">
               {[0.0, 0.2, 0.5, 0.8].map(v => (
                 <button
@@ -1217,9 +1274,7 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] mt-2 leading-relaxed" style={{ color: C.inkMute }}>
-              Норми відрізняються за країнами: Україна — 0.2 ‰, ЄС — переважно 0.5 ‰, Мальта — 0.8 ‰.
-            </p>
+            <p className="text-[10px] mt-2 leading-relaxed" style={{ color: C.inkMute }}>{t('profile.countryHint')}</p>
           </div>
         </div>
 
@@ -1228,7 +1283,7 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
           className="w-full mt-7 py-3 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
           style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`, color: '#fff8eb' }}
         >
-          <Check className="w-4 h-4" /> Зберегти
+          <Check className="w-4 h-4" /> {t('profile.save')}
         </button>
       </div>
     </div>
@@ -1237,7 +1292,8 @@ function ProfileModal({ profile, onClose, onSave, firstRun }) {
 
 // ====== CUSTOM DRINK MODAL ======
 function CustomDrinkModal({ onClose, onAdd }) {
-  const [name, setName] = useState('Напій');
+  const { t } = useT();
+  const [name, setName] = useState(t('custom.defaultName'));
   const [volumeMl, setVolumeMl] = useState(330);
   const [alcoholPct, setAlcoholPct] = useState(5);
   const [whenMs, setWhenMs] = useState(Date.now());
@@ -1252,7 +1308,7 @@ function CustomDrinkModal({ onClose, onAdd }) {
       <div className="rounded-t-3xl sm:rounded-3xl w-full max-w-md p-6 sm:p-7 max-h-[95vh] overflow-y-auto"
            style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 8px 32px rgba(60,40,15,0.2)' }}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold tracking-tight" style={{ color: C.ink }}>Свій напій</h2>
+          <h2 className="text-2xl font-bold tracking-tight" style={{ color: C.ink }}>{t('custom.title')}</h2>
           <button onClick={onClose} className="p-2 rounded-full transition"
                   onMouseEnter={(e) => e.currentTarget.style.background = '#f5ead0'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
@@ -1261,95 +1317,124 @@ function CustomDrinkModal({ onClose, onAdd }) {
         </div>
 
         <div className="space-y-4">
-          <Field label="Іконка">
-            <div className="flex gap-1.5 flex-wrap">
-              {DRINK_ICONS.map(em => (
-                <button
-                  key={em}
-                  onClick={() => setIcon(em)}
-                  className="w-10 h-10 rounded-lg text-xl transition"
-                  style={
-                    icon === em
-                      ? { background: C.ink }
-                      : { background: '#f5ead0' }
-                  }
-                >
-                  {em}
-                </button>
-              ))}
-            </div>
+          <Field label={t('custom.icon')}>
+            <IconPicker value={icon} onChange={setIcon} />
           </Field>
 
-          <Field label="Назва">
-            <input
-              type="text" value={name}
-              onChange={e => setName(e.target.value)}
-              className="w-full rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none"
-              style={{
-                background: '#f5ead0',
-                border: `1px solid transparent`,
-                color: C.ink
-              }}
-              onFocus={(e) => { e.target.style.borderColor = C.amber; e.target.style.background = '#fff'; }}
-              onBlur={(e) => { e.target.style.borderColor = 'transparent'; e.target.style.background = '#f5ead0'; }}
-            />
+          <Field label={t('custom.name')}>
+            <TextInput value={name} onChange={setName} />
           </Field>
 
-          <Field label={<>Об'єм · <span className="num-tabular" style={{ color: C.ink }}>{volumeMl} мл</span></>}>
-            <input
-              type="range" min="20" max="1000" step="10" value={volumeMl}
-              onChange={e => setVolumeMl(+e.target.value)}
-              className="w-full" style={{ accentColor: C.amberDeep }}
-            />
+          <Field label={t('custom.volume', { v: volumeMl })}>
+            <input type="range" min="20" max="1000" step="10" value={volumeMl}
+                   onChange={e => setVolumeMl(+e.target.value)}
+                   className="w-full" style={{ accentColor: C.amberDeep }} />
           </Field>
 
-          <Field label={<>Міцність · <span className="num-tabular" style={{ color: C.ink }}>{alcoholPct}%</span></>}>
-            <input
-              type="range" min="0.5" max="60" step="0.5" value={alcoholPct}
-              onChange={e => setAlcoholPct(+e.target.value)}
-              className="w-full" style={{ accentColor: C.amberDeep }}
-            />
+          <Field label={t('custom.strength', { p: alcoholPct })}>
+            <input type="range" min="0.5" max="60" step="0.5" value={alcoholPct}
+                   onChange={e => setAlcoholPct(+e.target.value)}
+                   className="w-full" style={{ accentColor: C.amberDeep }} />
           </Field>
 
-          <Field label="Коли випито">
+          <Field label={t('time.title')}>
             <DateTimeQuickPicker value={whenMs} onChange={setWhenMs} />
           </Field>
 
-          <div className="rounded-xl p-3 flex justify-between items-center"
-               style={{ background: '#f5ead0' }}>
-            <span className="text-xs font-medium" style={{ color: C.inkSoft }}>Чистий спирт</span>
-            <span className="num-tabular text-lg font-bold" style={{ color: C.ink }}>
-              {grams.toFixed(1)} г
-            </span>
-          </div>
+          <PureAlcoholBox grams={grams} />
 
           <label className="flex items-center gap-2.5 p-2 cursor-pointer select-none">
-            <input
-              type="checkbox" checked={savePreset}
-              onChange={e => setSavePreset(e.target.checked)}
-              className="w-4 h-4 rounded" style={{ accentColor: C.amberDeep }}
-            />
-            <span className="text-sm" style={{ color: C.inkSoft }}>
-              Зберегти як пресет для швидкого додавання
-            </span>
+            <input type="checkbox" checked={savePreset}
+                   onChange={e => setSavePreset(e.target.checked)}
+                   className="w-4 h-4 rounded" style={{ accentColor: C.amberDeep }} />
+            <span className="text-sm" style={{ color: C.inkSoft }}>{t('custom.savePreset')}</span>
           </label>
         </div>
 
+        <PrimaryButton onClick={() => onAdd({ name, volumeMl, alcoholPct, icon }, whenMs, savePreset)}>
+          <Plus className="w-4 h-4" /> {t('custom.add')}
+        </PrimaryButton>
+      </div>
+    </div>
+  );
+}
+
+// ====== EDIT DRINK MODAL ======
+function EditDrinkModal({ drink, onClose, onSave, onDelete }) {
+  const { t } = useT();
+  const [name, setName] = useState(drink.name || '');
+  const [volumeMl, setVolumeMl] = useState(drink.volumeMl);
+  const [alcoholPct, setAlcoholPct] = useState(drink.alcoholPct);
+  const [whenMs, setWhenMs] = useState(drink.timestamp);
+  const [icon, setIcon] = useState(drink.icon || '🥃');
+
+  const grams = alcoholGrams(volumeMl, alcoholPct);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+         style={{ background: 'rgba(60,40,15,0.4)', backdropFilter: 'blur(4px)' }}>
+      <div className="rounded-t-3xl sm:rounded-3xl w-full max-w-md p-6 sm:p-7 max-h-[95vh] overflow-y-auto"
+           style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 8px 32px rgba(60,40,15,0.2)' }}>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold tracking-tight" style={{ color: C.ink }}>{t('edit.title')}</h2>
+          <button onClick={onClose} className="p-2 rounded-full transition"
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#f5ead0'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+            <X className="w-4 h-4" style={{ color: C.inkSoft }} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <Field label={t('custom.icon')}>
+            <IconPicker value={icon} onChange={setIcon} />
+          </Field>
+
+          <Field label={t('custom.name')}>
+            <TextInput value={name} onChange={setName} />
+          </Field>
+
+          <Field label={t('custom.volume', { v: volumeMl })}>
+            <input type="range" min="20" max="1000" step="10" value={volumeMl}
+                   onChange={e => setVolumeMl(+e.target.value)}
+                   className="w-full" style={{ accentColor: C.amberDeep }} />
+          </Field>
+
+          <Field label={t('custom.strength', { p: alcoholPct })}>
+            <input type="range" min="0.5" max="60" step="0.5" value={alcoholPct}
+                   onChange={e => setAlcoholPct(+e.target.value)}
+                   className="w-full" style={{ accentColor: C.amberDeep }} />
+          </Field>
+
+          <Field label={t('time.title')}>
+            <DateTimeQuickPicker value={whenMs} onChange={setWhenMs} />
+          </Field>
+
+          <PureAlcoholBox grams={grams} />
+        </div>
+
+        <PrimaryButton onClick={() => onSave({ name, volumeMl, alcoholPct, icon, timestamp: whenMs })}>
+          <Check className="w-4 h-4" /> {t('edit.save')}
+        </PrimaryButton>
+
         <button
-          onClick={() => onAdd({ name, volumeMl, alcoholPct, icon }, whenMs, savePreset)}
-          className="w-full mt-5 py-3 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
-          style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`, color: '#fff8eb' }}
+          onClick={() => { if (confirm(t('edit.delete') + '?')) onDelete(); }}
+          className="w-full mt-2 py-3 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
+          style={{ background: 'transparent', color: C.bad, border: `1px solid ${C.badSoft}` }}
         >
-          <Plus className="w-4 h-4" /> Додати
+          <Trash2 className="w-4 h-4" /> {t('edit.delete')}
         </button>
       </div>
     </div>
   );
 }
 
-// ====== TIME PICKER MODAL (for adding presets at past time) ======
+// ====== TIME PICKER (preset → past) ======
 function TimePickerModal({ preset, onClose, onAdd }) {
+  const { t } = useT();
   const [whenMs, setWhenMs] = useState(Date.now());
+  const isMl = !t('stats.volumeMl').includes('ml');
+  const mlLabel = isMl ? 'мл' : 'ml';
+  const gLabel = t('stats.alcoholG').includes('Alc') ? 'g' : 'г';
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -1357,7 +1442,7 @@ function TimePickerModal({ preset, onClose, onAdd }) {
       <div className="rounded-t-3xl sm:rounded-3xl w-full max-w-md p-6 sm:p-7"
            style={{ background: C.card, border: `1px solid ${C.border}`, boxShadow: '0 8px 32px rgba(60,40,15,0.2)' }}>
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xl font-bold tracking-tight" style={{ color: C.ink }}>Коли випито?</h2>
+          <h2 className="text-xl font-bold tracking-tight" style={{ color: C.ink }}>{t('time.title')}</h2>
           <button onClick={onClose} className="p-2 rounded-full transition"
                   onMouseEnter={(e) => e.currentTarget.style.background = '#f5ead0'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
@@ -1370,20 +1455,16 @@ function TimePickerModal({ preset, onClose, onAdd }) {
           <div className="flex-1">
             <div className="text-sm font-semibold" style={{ color: C.ink }}>{preset.name}</div>
             <div className="text-[11px] num-tabular font-medium" style={{ color: C.inkMute }}>
-              {preset.volumeMl} мл · {preset.alcoholPct}% · {alcoholGrams(preset.volumeMl, preset.alcoholPct).toFixed(1)} г
+              {preset.volumeMl} {mlLabel} · {preset.alcoholPct}% · {alcoholGrams(preset.volumeMl, preset.alcoholPct).toFixed(1)} {gLabel}
             </div>
           </div>
         </div>
 
         <DateTimeQuickPicker value={whenMs} onChange={setWhenMs} />
 
-        <button
-          onClick={() => onAdd(whenMs)}
-          className="w-full mt-6 py-3 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
-          style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`, color: '#fff8eb' }}
-        >
-          <Plus className="w-4 h-4" /> Додати в щоденник
-        </button>
+        <PrimaryButton onClick={() => onAdd(whenMs)}>
+          <Plus className="w-4 h-4" /> {t('time.addToJournal')}
+        </PrimaryButton>
       </div>
     </div>
   );
@@ -1391,26 +1472,26 @@ function TimePickerModal({ preset, onClose, onAdd }) {
 
 // ====== DATE+TIME QUICK PICKER ======
 function DateTimeQuickPicker({ value, onChange }) {
-  // Quick presets: now, 30m, 2h, yesterday-evening, last-week-evening
+  const { t } = useT();
+  const fmtRel = useFmtRelative();
+
   const presets = [
-    { label: 'Зараз', ms: () => Date.now() },
-    { label: '30 хв тому', ms: () => Date.now() - 30 * 60000 },
-    { label: '2 год тому', ms: () => Date.now() - 2 * 3600000 },
-    { label: 'Вчора 20:00', ms: () => {
+    { label: t('time.now'),         ms: () => Date.now() },
+    { label: t('time.m30'),         ms: () => Date.now() - 30 * 60000 },
+    { label: t('time.h2'),          ms: () => Date.now() - 2 * 3600000 },
+    { label: t('time.yesterday20'), ms: () => {
       const d = new Date();
       d.setDate(d.getDate() - 1);
       d.setHours(20, 0, 0, 0);
       return d.getTime();
     }},
-    { label: 'Тиждень тому', ms: () => Date.now() - 7 * 86400000 },
+    { label: t('time.weekAgo'),     ms: () => Date.now() - 7 * 86400000 },
   ];
 
-  // Mark which preset is "active" (within 1 min tolerance)
   const isPresetActive = (preset) => Math.abs(value - preset.ms()) < 60000;
 
   return (
     <div className="space-y-3">
-      {/* Quick chips */}
       <div className="flex flex-wrap gap-1.5">
         {presets.map((p) => {
           const active = isPresetActive(p);
@@ -1431,33 +1512,28 @@ function DateTimeQuickPicker({ value, onChange }) {
         })}
       </div>
 
-      {/* Native datetime picker */}
       <input
         type="datetime-local"
         value={toLocalInput(value)}
         max={toLocalInput(Date.now())}
-        onChange={(e) => {
-          if (e.target.value) onChange(fromLocalInput(e.target.value));
-        }}
+        onChange={(e) => { if (e.target.value) onChange(fromLocalInput(e.target.value)); }}
         className="w-full rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none num-tabular"
         style={{
-          background: '#f5ead0',
-          border: '1px solid transparent',
-          color: C.ink,
-          colorScheme: 'light'
+          background: '#f5ead0', border: '1px solid transparent',
+          color: C.ink, colorScheme: 'light'
         }}
         onFocus={(e) => { e.target.style.borderColor = C.amber; e.target.style.background = '#fff'; }}
         onBlur={(e) => { e.target.style.borderColor = 'transparent'; e.target.style.background = '#f5ead0'; }}
       />
 
-      {/* Human-readable preview */}
       <div className="text-[11px] text-center font-medium" style={{ color: C.inkSoft }}>
-        {fmtRelative(value)}
+        {fmtRel(value)}
       </div>
     </div>
   );
 }
 
+// ====== SHARED FIELD HELPERS ======
 const Field = ({ label, children }) => (
   <div>
     <label className="text-[10px] uppercase tracking-wider block mb-2 font-semibold" style={{ color: C.inkSoft }}>
@@ -1466,3 +1542,58 @@ const Field = ({ label, children }) => (
     {children}
   </div>
 );
+
+function IconPicker({ value, onChange }) {
+  return (
+    <div className="flex gap-1.5 flex-wrap">
+      {DRINK_ICONS.map(em => (
+        <button
+          key={em}
+          onClick={() => onChange(em)}
+          className="w-10 h-10 rounded-lg text-xl transition"
+          style={value === em ? { background: C.ink } : { background: '#f5ead0' }}
+        >
+          {em}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TextInput({ value, onChange }) {
+  return (
+    <input
+      type="text" value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none"
+      style={{ background: '#f5ead0', border: '1px solid transparent', color: C.ink }}
+      onFocus={(e) => { e.target.style.borderColor = C.amber; e.target.style.background = '#fff'; }}
+      onBlur={(e) => { e.target.style.borderColor = 'transparent'; e.target.style.background = '#f5ead0'; }}
+    />
+  );
+}
+
+function PureAlcoholBox({ grams }) {
+  const { t } = useT();
+  const gLabel = t('stats.alcoholG').includes('Alc') ? 'g' : 'г';
+  return (
+    <div className="rounded-xl p-3 flex justify-between items-center" style={{ background: '#f5ead0' }}>
+      <span className="text-xs font-medium" style={{ color: C.inkSoft }}>{t('custom.pureAlcohol')}</span>
+      <span className="num-tabular text-lg font-bold" style={{ color: C.ink }}>
+        {grams.toFixed(1)} {gLabel}
+      </span>
+    </div>
+  );
+}
+
+function PrimaryButton({ onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full mt-5 py-3 rounded-xl font-semibold text-sm active:scale-[0.98] transition flex items-center justify-center gap-2"
+      style={{ background: `linear-gradient(135deg, ${C.amber}, ${C.amberDeep})`, color: '#fff8eb' }}
+    >
+      {children}
+    </button>
+  );
+}
