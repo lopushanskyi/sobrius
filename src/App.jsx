@@ -60,28 +60,31 @@ const BUILTIN_PRESETS = [
 
 const DRINK_ICONS = ['🍺', '🍻', '🍷', '🥂', '🥃', '🍹', '🍶', '🍾', '🧃'];
 
-// ====== INLINE DROP LOGO ======
-// Same droplet as launcher icon (resources/icon.png), rendered as SVG.
+// ====== INLINE LOGO ======
+// Cup with droplet — matches the Android launcher icon exactly.
 function DropLogo({ size = 36 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <radialGradient id="logoBg" cx="50%" cy="35%" r="65%">
-          <stop offset="0%" stopColor="#1a0f08" />
-          <stop offset="100%" stopColor="#050302" />
-        </radialGradient>
-        <linearGradient id="logoDroplet" x1="50%" y1="0%" x2="50%" y2="100%">
-          <stop offset="0%" stopColor="#f4c896" />
-          <stop offset="100%" stopColor="#8b5e34" />
+        <linearGradient id="logoBg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#2d5d4a" />
+          <stop offset="100%" stopColor="#1f4836" />
         </linearGradient>
-        <linearGradient id="logoHighlight" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.4" />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+        <linearGradient id="logoDroplet" x1="50%" y1="0%" x2="50%" y2="100%">
+          <stop offset="0%" stopColor="#e8a23a" />
+          <stop offset="100%" stopColor="#b8731a" />
         </linearGradient>
       </defs>
       <rect width="512" height="512" rx="112" fill="url(#logoBg)" />
-      <path d="M256 110 C 256 110, 380 245, 380 340 C 380 410, 324 462, 256 462 C 188 462, 132 410, 132 340 C 132 245, 256 110, 256 110 Z" fill="url(#logoDroplet)" />
-      <ellipse cx="210" cy="280" rx="38" ry="55" fill="url(#logoHighlight)" transform="rotate(-25 210 280)" />
+      <path
+        d="M 156 168 Q 156 156 168 156 L 344 156 Q 356 156 356 168 L 340 396 Q 339 412 323 412 L 189 412 Q 173 412 172 396 Z M 178 184 L 334 184 L 332 212 L 180 212 Z"
+        fill="#f5e8c8"
+        fillRule="evenodd"
+      />
+      <path
+        d="M 256 252 Q 256 252 308 320 Q 308 360 282 376 Q 256 388 230 376 Q 204 360 204 320 Q 256 252 256 252 Z"
+        fill="url(#logoDroplet)"
+      />
     </svg>
   );
 }
